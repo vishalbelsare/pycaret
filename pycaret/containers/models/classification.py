@@ -9,23 +9,52 @@
 # to complete the process. Refer to the existing classes for examples.
 
 import logging
+from typing import Any, Dict, List, Optional, Union
+
+import numpy as np
+from packaging import version
+
+import pycaret.containers.base_container
 import pycaret.internal.cuml_wrappers
-from typing import Union, Dict, Any, Optional
 from pycaret.containers.models.base_model import (
     ModelContainer,
     leftover_parameters_to_categorical_distributions,
 )
 from pycaret.internal.cuml_wrappers import get_svc_classifier
-from pycaret.internal.utils import (
-    param_grid_to_lists,
-    get_logger,
-    get_class_name,
-    np_list_arange,
+from pycaret.internal.distributions import (
+    Distribution,
+    IntUniformDistribution,
+    UniformDistribution,
 )
-from pycaret.internal.distributions import *
-import pycaret.containers.base_container
-import numpy as np
-from packaging import version
+from pycaret.utils._dependencies import _check_soft_dependencies
+from pycaret.utils.generic import (
+    get_class_name,
+    get_logger,
+    np_list_arange,
+    param_grid_to_lists,
+)
+
+# First one in the list is the default ----
+ALL_ALLOWED_ENGINES: Dict[str, List[str]] = {
+    "lr": ["sklearn", "sklearnex"],
+    "knn": ["sklearn", "sklearnex"],
+    "rbfsvm": ["sklearn", "sklearnex"],
+}
+
+
+def get_container_default_engines() -> Dict[str, str]:
+    """Get the default engines from all models
+    Returns
+    -------
+    Dict[str, str]
+        Default engines for all containers. If unspecified, it is not included
+        in the return dictionary.
+    """
+    default_engines = {}
+    for id, all_engines in ALL_ALLOWED_ENGINES.items():
+        default_engines[id] = all_engines[0]
+    return default_engines
+
 
 class ClassifierContainer(ModelContainer):
     """
@@ -45,15 +74,15 @@ class ClassifierContainer(ModelContainer):
     eq_function : type, default = None
         Function to use to check whether an object (model) can be considered equal to the model
         in the container. If None, will be ``is_instance(x, class_def)`` where x is the object.
-    args : dict, default = {}
+    args : dict, default = {} (empty dict)
         The arguments to always pass to constructor when initializing object of class_def class.
     is_special : bool, default = False
         Is the model special (not intended to be used on its own, eg. VotingClassifier).
-    tune_grid : dict of str : list, default = {}
+    tune_grid : dict of str : list, default = {} (empty dict)
         The hyperparameters tuning grid for random and grid search.
-    tune_distribution : dict of str : Distribution, default = {}
+    tune_distribution : dict of str : Distribution, default = {} (empty dict)
         The hyperparameters tuning grid for other types of searches.
-    tune_args : dict, default = {}
+    tune_args : dict, default = {} (empty dict)
         The arguments to always pass to the tuner.
     shap : bool or str, default = False
         If False, SHAP is not supported. Otherwise, one of 'type1', 'type2' to determine SHAP type.
@@ -121,7 +150,6 @@ class ClassifierContainer(ModelContainer):
         is_soft_voting_supported: Optional[bool] = None,
         tunable: Optional[type] = None,
     ) -> None:
-
         self.shap = shap
         if not (isinstance(shap, bool) or shap in ["type1", "type2"]):
             raise ValueError("shap must be either bool or 'type1', 'type2'.")
@@ -165,7 +193,7 @@ class ClassifierContainer(ModelContainer):
             )
 
             del model_instance
-        except:
+        except Exception:
             self.is_boosting_supported = False
             self.is_soft_voting_supported = False
         finally:
@@ -222,26 +250,35 @@ class ClassifierContainer(ModelContainer):
 
 
 class LogisticRegressionClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+        np.random.seed(experiment.seed)
         gpu_imported = False
 
-        from sklearn.linear_model import LogisticRegression
+        id = "lr"
+        self._set_engine_related_vars(
+            id=id, all_allowed_engines=ALL_ALLOWED_ENGINES, experiment=experiment
+        )
 
-        if globals_dict["gpu_param"] == "force":
+        if self.engine == "sklearn":
+            from sklearn.linear_model import LogisticRegression
+        elif self.engine == "sklearnex":
+            if _check_soft_dependencies("sklearnex", extra=None, severity="warning"):
+                from sklearnex.linear_model import LogisticRegression
+            else:
+                from sklearn.linear_model import LogisticRegression
+
+        if experiment.gpu_param == "force":
             from cuml.linear_model import LogisticRegression
 
             logger.info("Imported cuml.linear_model.LogisticRegression")
             gpu_imported = True
-        elif globals_dict["gpu_param"]:
-            try:
+        elif experiment.gpu_param:
+            if _check_soft_dependencies("cuml", extra=None, severity="warning"):
                 from cuml.linear_model import LogisticRegression
 
                 logger.info("Imported cuml.linear_model.LogisticRegression")
                 gpu_imported = True
-            except ImportError:
-                logger.warning("Couldn't import cuml.linear_model.LogisticRegression")
 
         args = {"max_iter": 1000}
         tune_args = {}
@@ -254,7 +291,7 @@ class LogisticRegressionClassifierContainer(ClassifierContainer):
         if gpu_imported:
             tune_grid["penalty"] = ["l2", "l1"]
         else:
-            args["random_state"] = globals_dict["seed"]
+            args["random_state"] = experiment.seed
 
             tune_grid["class_weight"] = ["balanced", {}]
 
@@ -262,7 +299,7 @@ class LogisticRegressionClassifierContainer(ClassifierContainer):
         leftover_parameters_to_categorical_distributions(tune_grid, tune_distributions)
 
         super().__init__(
-            id="lr",
+            id=id,
             name="Logistic Regression",
             class_def=LogisticRegression,
             args=args,
@@ -274,26 +311,35 @@ class LogisticRegressionClassifierContainer(ClassifierContainer):
 
 
 class KNeighborsClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+        np.random.seed(experiment.seed)
         gpu_imported = False
 
-        from sklearn.neighbors import KNeighborsClassifier
+        id = "knn"
+        self._set_engine_related_vars(
+            id=id, all_allowed_engines=ALL_ALLOWED_ENGINES, experiment=experiment
+        )
 
-        if globals_dict["gpu_param"] == "force":
+        if self.engine == "sklearn":
+            from sklearn.neighbors import KNeighborsClassifier
+        elif self.engine == "sklearnex":
+            if _check_soft_dependencies("sklearnex", extra=None, severity="warning"):
+                from sklearnex.neighbors import KNeighborsClassifier
+            else:
+                from sklearn.neighbors import KNeighborsClassifier
+
+        if experiment.gpu_param == "force":
             from cuml.neighbors import KNeighborsClassifier
 
             logger.info("Imported cuml.neighbors.KNeighborsClassifier")
             gpu_imported = True
-        elif globals_dict["gpu_param"]:
-            try:
+        elif experiment.gpu_param:
+            if _check_soft_dependencies("cuml", extra=None, severity="warning"):
                 from cuml.neighbors import KNeighborsClassifier
 
                 logger.info("Imported cuml.neighbors.KNeighborsClassifier")
                 gpu_imported = True
-            except ImportError:
-                logger.warning("Couldn't import cuml.neighbors.KNeighborsClassifier")
 
         args = {}
         tune_args = {}
@@ -306,14 +352,14 @@ class KNeighborsClassifierContainer(ClassifierContainer):
         tune_grid["metric"] = ["minkowski", "euclidean", "manhattan"]
 
         if not gpu_imported:
-            args["n_jobs"] = globals_dict["n_jobs_param"]
+            args["n_jobs"] = experiment.n_jobs_param
             tune_grid["weights"] += ["distance"]
 
         tune_distributions["n_neighbors"] = IntUniformDistribution(1, 51)
         leftover_parameters_to_categorical_distributions(tune_grid, tune_distributions)
 
         super().__init__(
-            id="knn",
+            id=id,
             name="K Neighbors Classifier",
             class_def=KNeighborsClassifier,
             args=args,
@@ -325,9 +371,9 @@ class KNeighborsClassifierContainer(ClassifierContainer):
 
 
 class GaussianNBClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.naive_bayes import GaussianNB
 
         args = {}
@@ -381,12 +427,12 @@ class GaussianNBClassifierContainer(ClassifierContainer):
 
 
 class DecisionTreeClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.tree import DecisionTreeClassifier
 
-        args = {"random_state": globals_dict["seed"]}
+        args = {"random_state": experiment.seed}
         tune_args = {}
         tune_grid = {
             "max_depth": np_list_arange(1, 16, 1, inclusive=True),
@@ -435,26 +481,24 @@ class DecisionTreeClassifierContainer(ClassifierContainer):
 
 
 class SGDClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+        np.random.seed(experiment.seed)
         gpu_imported = False
 
         from sklearn.linear_model import SGDClassifier
 
-        if globals_dict["gpu_param"] == "force":
+        if experiment.gpu_param == "force":
             from cuml import MBSGDClassifier as SGDClassifier
 
             logger.info("Imported cuml.MBSGDClassifier")
             gpu_imported = True
-        elif globals_dict["gpu_param"]:
-            try:
+        elif experiment.gpu_param:
+            if _check_soft_dependencies("cuml", extra=None, severity="warning"):
                 from cuml import MBSGDClassifier as SGDClassifier
 
                 logger.info("Imported cuml.MBSGDClassifier")
                 gpu_imported = True
-            except ImportError:
-                logger.warning("Couldn't import cuml.MBSGDClassifier")
 
         args = {"tol": 0.001, "loss": "hinge", "penalty": "l2", "eta0": 0.001}
         tune_args = {}
@@ -501,12 +545,12 @@ class SGDClassifierContainer(ClassifierContainer):
                 (16, 0),
             ]
             for arg, x_len in batch_size:
-                if len(globals_dict["X_train"]) >= x_len:
+                if len(experiment.X_train) >= x_len:
                     args["batch_size"] = arg
                     break
         else:
-            args["random_state"] = globals_dict["seed"]
-            args["n_jobs"] = globals_dict["n_jobs_param"]
+            args["random_state"] = experiment.seed
+            args["n_jobs"] = experiment.n_jobs_param
 
         leftover_parameters_to_categorical_distributions(tune_grid, tune_distributions)
 
@@ -523,33 +567,42 @@ class SGDClassifierContainer(ClassifierContainer):
 
 
 class SVCClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+        np.random.seed(experiment.seed)
         gpu_imported = False
 
-        from sklearn.svm import SVC
+        id = "rbfsvm"
+        self._set_engine_related_vars(
+            id=id, all_allowed_engines=ALL_ALLOWED_ENGINES, experiment=experiment
+        )
 
-        if globals_dict["gpu_param"] == "force":
+        if self.engine == "sklearn":
+            from sklearn.svm import SVC
+        elif self.engine == "sklearnex":
+            if _check_soft_dependencies("sklearnex", extra=None, severity="warning"):
+                from sklearnex.svm import SVC
+            else:
+                from sklearn.svm import SVC
+
+        if experiment.gpu_param == "force":
             from cuml.svm import SVC
 
             logger.info("Imported cuml.svm.SVC")
             gpu_imported = True
-        elif globals_dict["gpu_param"]:
-            try:
+        elif experiment.gpu_param:
+            if _check_soft_dependencies("cuml", extra=None, severity="warning"):
                 from cuml.svm import SVC
 
                 logger.info("Imported cuml.svm.SVC")
                 gpu_imported = True
-            except ImportError:
-                logger.warning("Couldn't import cuml.svm.SVC")
 
         args = {
             "gamma": "auto",
             "C": 1.0,
             "probability": True,
             "kernel": "rbf",
-            "random_state": globals_dict["seed"],
+            "random_state": experiment.seed,
         }
         tune_args = {}
         tune_grid = {
@@ -566,7 +619,7 @@ class SVCClassifierContainer(ClassifierContainer):
             SVC = get_svc_classifier()
 
         super().__init__(
-            id="rbfsvm",
+            id=id,
             name="SVM - Radial Kernel",
             class_def=SVC,
             args=args,
@@ -579,19 +632,19 @@ class SVCClassifierContainer(ClassifierContainer):
 
 
 class GaussianProcessClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.gaussian_process import GaussianProcessClassifier
 
         args = {
             "copy_X_train": False,
-            "random_state": globals_dict["seed"],
-            "n_jobs": globals_dict["n_jobs_param"],
+            "random_state": experiment.seed,
+            "n_jobs": experiment.n_jobs_param,
         }
         tune_args = {}
         tune_grid = {
-            "max_iter_predict": [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,]
+            "max_iter_predict": [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
         }
         tune_distributions = {"max_iter_predict": IntUniformDistribution(100, 1000)}
 
@@ -609,13 +662,14 @@ class GaussianProcessClassifierContainer(ClassifierContainer):
 
 
 class MLPClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.neural_network import MLPClassifier
+
         from pycaret.internal.tunable import TunableMLPClassifier
 
-        args = {"random_state": globals_dict["seed"], "max_iter": 500}
+        args = {"random_state": experiment.seed, "max_iter": 500}
         tune_args = {}
         tune_grid = {
             "learning_rate": ["constant", "invscaling", "adaptive"],
@@ -666,26 +720,24 @@ class MLPClassifierContainer(ClassifierContainer):
 
 
 class RidgeClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+        np.random.seed(experiment.seed)
         gpu_imported = False
 
         from sklearn.linear_model import RidgeClassifier
 
-        if globals_dict["gpu_param"] == "force":
+        if experiment.gpu_param == "force":
             import cuml.linear_model
 
             logger.info("Imported cuml.linear_model")
             gpu_imported = True
-        elif globals_dict["gpu_param"]:
-            try:
+        elif experiment.gpu_param:
+            if _check_soft_dependencies("cuml", extra=None, severity="warning"):
                 import cuml.linear_model
 
                 logger.info("Imported cuml.linear_model")
                 gpu_imported = True
-            except ImportError:
-                logger.warning("Couldn't import cuml.linear_model")
 
         args = {}
         tune_args = {}
@@ -695,12 +747,9 @@ class RidgeClassifierContainer(ClassifierContainer):
         if gpu_imported:
             RidgeClassifier = pycaret.internal.cuml_wrappers.get_ridge_classifier()
         else:
-            args = {"random_state": globals_dict["seed"]}
+            args = {"random_state": experiment.seed}
 
-        tune_grid = {
-            "normalize": [True, False],
-        }
-
+        tune_grid = {}
         tune_grid["alpha"] = np_list_arange(0.01, 10, 0.01, inclusive=False)
         tune_grid["fit_intercept"] = [True, False]
         tune_distributions["alpha"] = UniformDistribution(0.001, 10)
@@ -723,26 +772,24 @@ class RidgeClassifierContainer(ClassifierContainer):
 
 
 class RandomForestClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+        np.random.seed(experiment.seed)
         gpu_imported = False
 
         from sklearn.ensemble import RandomForestClassifier
 
-        if globals_dict["gpu_param"] == "force":
+        if experiment.gpu_param == "force":
             import cuml.ensemble
 
             logger.info("Imported cuml.ensemble")
             gpu_imported = True
-        elif globals_dict["gpu_param"]:
-            try:
+        elif experiment.gpu_param:
+            if _check_soft_dependencies("cuml", extra=None, severity="warning"):
                 import cuml.ensemble
 
                 logger.info("Imported cuml.ensemble")
                 gpu_imported = True
-            except ImportError:
-                logger.warning("Couldn't import cuml.ensemble")
 
         if gpu_imported:
             RandomForestClassifier = (
@@ -751,20 +798,17 @@ class RandomForestClassifierContainer(ClassifierContainer):
 
         if not gpu_imported:
             args = {
-                "random_state": globals_dict["seed"],
-                "n_jobs": globals_dict["n_jobs_param"],
+                "random_state": experiment.seed,
+                "n_jobs": experiment.n_jobs_param,
             }
         else:
             import cuml
+
             if version.parse(cuml.__version__) >= version.parse("0.19"):
-                args = {
-                "random_state": globals_dict["seed"],
-                }
+                args = {"random_state": experiment.seed}
             else:
-                args = {
-                    "seed": globals_dict["seed"]
-                }
-        
+                args = {"seed": experiment.seed}
+
         tune_args = {}
         tune_grid = {
             "n_estimators": np_list_arange(10, 300, 10, inclusive=True),
@@ -824,9 +868,9 @@ class RandomForestClassifierContainer(ClassifierContainer):
 
 
 class QuadraticDiscriminantAnalysisContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 
         args = {}
@@ -849,12 +893,12 @@ class QuadraticDiscriminantAnalysisContainer(ClassifierContainer):
 
 
 class AdaBoostClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.ensemble import AdaBoostClassifier
 
-        args = {"random_state": globals_dict["seed"]}
+        args = {"random_state": experiment.seed}
         tune_args = {}
         tune_grid = {
             "n_estimators": np_list_arange(10, 300, 10, inclusive=True),
@@ -874,7 +918,7 @@ class AdaBoostClassifierContainer(ClassifierContainer):
                 0.4,
                 0.5,
             ],
-            "algorithm": ["SAMME", "SAMME.R"],
+            "algorithm": ["SAMME"],
         }
         tune_distributions = {
             "n_estimators": IntUniformDistribution(10, 300),
@@ -896,12 +940,12 @@ class AdaBoostClassifierContainer(ClassifierContainer):
 
 
 class GradientBoostingClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.ensemble import GradientBoostingClassifier
 
-        args = {"random_state": globals_dict["seed"]}
+        args = {"random_state": experiment.seed}
         tune_args = {}
         tune_grid = {
             "n_estimators": np_list_arange(10, 300, 10, inclusive=True),
@@ -970,9 +1014,9 @@ class GradientBoostingClassifierContainer(ClassifierContainer):
 
 
 class LinearDiscriminantAnalysisContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 
         args = {}
@@ -1019,14 +1063,14 @@ class LinearDiscriminantAnalysisContainer(ClassifierContainer):
 
 
 class ExtraTreesClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.ensemble import ExtraTreesClassifier
 
         args = {
-            "random_state": globals_dict["seed"],
-            "n_jobs": globals_dict["n_jobs_param"],
+            "random_state": experiment.seed,
+            "n_jobs": experiment.n_jobs_param,
         }
         tune_args = {}
         tune_grid = {
@@ -1080,13 +1124,12 @@ class ExtraTreesClassifierContainer(ClassifierContainer):
 
 
 class XGBClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
-        try:
+        np.random.seed(experiment.seed)
+        if _check_soft_dependencies("xgboost", extra="models", severity="warning"):
             import xgboost
-        except ImportError:
-            logger.warning("Couldn't import xgboost.XGBClassifier")
+        else:
             self.active = False
             return
 
@@ -1100,12 +1143,19 @@ class XGBClassifierContainer(ClassifierContainer):
         from xgboost import XGBClassifier
 
         args = {
-            "random_state": globals_dict["seed"],
-            "n_jobs": globals_dict["n_jobs_param"],
+            "random_state": experiment.seed,
+            "n_jobs": experiment.n_jobs_param,
             "verbosity": 0,
             "booster": "gbtree",
-            "tree_method": "gpu_hist" if globals_dict["gpu_param"] else "auto",
         }
+
+        # If using XGBoost version 2.0 or higher
+        if version.parse(xgboost.__version__) >= version.parse("2.0.0"):
+            args["tree_method"] = "hist" if experiment.gpu_param else "auto"
+            args["device"] = "gpu" if experiment.gpu_param else "cpu"
+        else:
+            args["tree_method"] = "gpu_hist" if experiment.gpu_param else "auto"
+
         tune_args = {}
         tune_grid = {
             "learning_rate": [
@@ -1200,20 +1250,20 @@ class XGBClassifierContainer(ClassifierContainer):
             tune_distribution=tune_distributions,
             tune_args=tune_args,
             shap="type2",
-            is_gpu_enabled=bool(globals_dict["gpu_param"]),
+            is_gpu_enabled=bool(experiment.gpu_param),
         )
 
 
 class LGBMClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from lightgbm import LGBMClassifier
         from lightgbm.basic import LightGBMError
 
         args = {
-            "random_state": globals_dict["seed"],
-            "n_jobs": globals_dict["n_jobs_param"],
+            "random_state": experiment.seed,
+            "n_jobs": experiment.n_jobs_param,
         }
         tune_args = {}
         tune_grid = {
@@ -1321,13 +1371,13 @@ class LGBMClassifierContainer(ClassifierContainer):
         leftover_parameters_to_categorical_distributions(tune_grid, tune_distributions)
 
         is_gpu_enabled = False
-        if globals_dict["gpu_param"]:
+        if experiment.gpu_param:
             try:
                 lgb = LGBMClassifier(device="gpu")
                 lgb.fit(np.zeros((2, 2)), [0, 1])
                 is_gpu_enabled = "gpu"
                 del lgb
-            except:
+            except Exception:
                 try:
                     lgb = LGBMClassifier(device="cuda")
                     lgb.fit(np.zeros((2, 2)), [0, 1])
@@ -1335,16 +1385,16 @@ class LGBMClassifierContainer(ClassifierContainer):
                     del lgb
                 except LightGBMError:
                     is_gpu_enabled = False
-                    if globals_dict["gpu_param"] == "force":
+                    if experiment.gpu_param == "force":
                         raise RuntimeError(
-                            f"LightGBM GPU mode not available. Consult https://lightgbm.readthedocs.io/en/latest/GPU-Tutorial.html."
+                            "LightGBM GPU mode not available. Consult https://lightgbm.readthedocs.io/en/latest/GPU-Tutorial.html."
                         )
 
-        if is_gpu_enabled=="gpu":
+        if is_gpu_enabled == "gpu":
             args["device"] = "gpu"
-        elif is_gpu_enabled=="cuda":
+        elif is_gpu_enabled == "cuda":
             args["device"] = "cuda"
-        
+
         super().__init__(
             id="lightgbm",
             name="Light Gradient Boosting Machine",
@@ -1359,13 +1409,12 @@ class LGBMClassifierContainer(ClassifierContainer):
 
 
 class CatBoostClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
+    def __init__(self, experiment):
         logger = get_logger()
-        np.random.seed(globals_dict["seed"])
-        try:
+        np.random.seed(experiment.seed)
+        if _check_soft_dependencies("catboost", extra="models", severity="warning"):
             import catboost
-        except ImportError:
-            logger.warning("Couldn't import catboost.CatBoostClassifier")
+        else:
             self.active = False
             return
 
@@ -1381,14 +1430,12 @@ class CatBoostClassifierContainer(ClassifierContainer):
         # suppress output
         logging.getLogger("catboost").setLevel(logging.ERROR)
 
-        use_gpu = globals_dict["gpu_param"] == "force" or (
-            globals_dict["gpu_param"] and len(globals_dict["X_train"]) >= 50000
-        )
+        use_gpu = experiment.gpu_param
 
         args = {
-            "random_state": globals_dict["seed"],
+            "random_state": experiment.seed,
             "verbose": False,
-            "thread_count": globals_dict["n_jobs_param"],
+            "thread_count": experiment.n_jobs_param,
             "task_type": "GPU" if use_gpu else "CPU",
             "border_count": 32 if use_gpu else 254,
         }
@@ -1425,7 +1472,7 @@ class CatBoostClassifierContainer(ClassifierContainer):
 
         if use_gpu:
             tune_grid["depth"] = list(range(1, 9))
-            tune_distributions["depth"] = (IntUniformDistribution(1, 8),)
+            tune_distributions["depth"] = IntUniformDistribution(1, 8)
 
         leftover_parameters_to_categorical_distributions(tune_grid, tune_distributions)
 
@@ -1441,15 +1488,18 @@ class CatBoostClassifierContainer(ClassifierContainer):
             is_gpu_enabled=use_gpu,
         )
 
+
 class DummyClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.dummy import DummyClassifier
 
-        args = {"strategy":"prior","random_state": globals_dict["seed"]}
+        args = {"strategy": "prior", "random_state": experiment.seed}
+
         tune_args = {}
-        tune_grid = {}
+        tune_grid = {"strategy": ["most_frequent", "prior", "stratified", "uniform"]}
+
         tune_distributions = {}
 
         leftover_parameters_to_categorical_distributions(tune_grid, tune_distributions)
@@ -1464,16 +1514,17 @@ class DummyClassifierContainer(ClassifierContainer):
             tune_args=tune_args,
             shap=False,
         )
-        
+
+
 class BaggingClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.ensemble import BaggingClassifier
 
         args = {
-            "random_state": globals_dict["seed"],
-            "n_jobs": 1 if globals_dict["gpu_param"] else None,
+            "random_state": experiment.seed,
+            "n_jobs": 1 if experiment.gpu_param else None,
         }
         tune_args = {}
         tune_grid = {
@@ -1504,9 +1555,9 @@ class BaggingClassifierContainer(ClassifierContainer):
 
 
 class StackingClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.ensemble import StackingClassifier
 
         args = {}
@@ -1531,10 +1582,11 @@ class StackingClassifierContainer(ClassifierContainer):
 
 
 class VotingClassifierContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.ensemble import VotingClassifier
+
         from pycaret.internal.tunable import TunableVotingClassifier
 
         args = {}
@@ -1563,9 +1615,9 @@ class VotingClassifierContainer(ClassifierContainer):
 
 
 class CalibratedClassifierCVContainer(ClassifierContainer):
-    def __init__(self, globals_dict: dict) -> None:
-        logger = get_logger()
-        np.random.seed(globals_dict["seed"])
+    def __init__(self, experiment):
+        get_logger()
+        np.random.seed(experiment.seed)
         from sklearn.calibration import CalibratedClassifierCV
 
         args = {}
@@ -1588,9 +1640,10 @@ class CalibratedClassifierCVContainer(ClassifierContainer):
             is_gpu_enabled=False,
         )
 
+
 def get_all_model_containers(
-    globals_dict: dict, raise_errors: bool = True
+    experiment: Any, raise_errors: bool = True
 ) -> Dict[str, ClassifierContainer]:
     return pycaret.containers.base_container.get_all_containers(
-        globals(), globals_dict, ClassifierContainer, raise_errors
+        globals(), experiment, ClassifierContainer, raise_errors
     )

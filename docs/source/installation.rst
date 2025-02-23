@@ -11,7 +11,7 @@ In order to avoid potential conflicts with other packages, it is strongly recomm
 .. code-block:: python
 
     # create a conda environment
-    conda create --name yourenvname python=3.8
+    conda create --name yourenvname python=3.10
 
     # activate conda environment
     conda activate yourenvname
@@ -35,15 +35,15 @@ PyCaret's default installation is a slim version of pycaret which only installs 
 Installing the nightly build
 ****************************
 
-PyCaret is a fast-evolving machine learning library. Often, you want to have access to the latest features but want to avoid compiling PyCaret from source or waiting for the next release. Fortunately, you can now install pycaret-nightly using pip.
+PyCaret is a fast-evolving machine learning library. Often, you want to have access to the latest features but want to avoid waiting for the next release. In order to do that, you can install the nightly version of PyCaret directly from GitHub.
 
 .. code-block:: python
 
     # install the nightly build 
-    pip install pycaret-nightly
+    pip install "https://github.com/pycaret/pycaret.git#egg=pycaret"
 
     # or install the full version of the nightly build
-    pip install pycaret-nightly[full]
+    pip install "https://github.com/pycaret/pycaret.git#egg=pycaret[full]"
 
 PyCaret on GPU
 ***************
@@ -51,18 +51,14 @@ PyCaret >= 2.2 provides the option to use GPU for select model training and hype
 
 * Extreme Gradient Boosting (requires no further installation)
 * CatBoost (requires no further installation)
-* Light Gradient Boosting Machine (requires GPU installation: https://lightgbm.readthedocs.io/en/latest/GPU-Tutorial.html)
+* Light Gradient Boosting Machine (requires GPU installation on some platforms: https://lightgbm.readthedocs.io/en/latest/GPU-Tutorial.html)
 * Logistic Regression, Ridge Classifier, Random Forest, K Neighbors Classifier, K Neighbors Regressor, Support Vector Machine, Linear Regression, Ridge Regression, Lasso Regression (requires cuML >= 0.15 https://github.com/rapidsai/cuml)
 
-If you are using Google Colab you can install Light Gradient Boosting Machine for GPU but first you have to uninstall LightGBM on CPU. Use the below command to do that:
+If you are using Google Colab, run the following in a cell to use Light Gradient Boosting Machine with GPU support.
 
-.. code-block:: python
+.. code-block:: shell
 
-    # uninstall lightgbm CPU
-    pip uninstall lightgbm -y
-
-    # install lightgbm GPU
-    pip install lightgbm --install-option=--gpu --install-option="--opencl-include-dir=/usr/local/cuda/include/" --install-option="--opencl-library=/usr/local/cuda/lib64/libOpenCL.so"
+    !mkdir -p /etc/OpenCL/vendors && echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
 
 CatBoost is only enabled on GPU when dataset has > 50,000 rows.
 

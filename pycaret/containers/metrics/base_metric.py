@@ -1,11 +1,17 @@
+# Copyright (C) 2019-2024 PyCaret
+
 # Module: containers.metrics.base_metric
 # Author: Antoni Baum (Yard1) <antoni.baum@protonmail.com>
+# Contributors (https://github.com/pycaret/pycaret/graphs/contributors)
 # License: MIT
 
-from typing import Dict, Any, Union, Optional
+
+from typing import Any, Dict, Optional, Union
+
+from sklearn.metrics import make_scorer  # type: ignore
+from sklearn.metrics._scorer import _BaseScorer  # type: ignore
+
 from pycaret.containers.base_container import BaseContainer
-from sklearn.metrics._scorer import _BaseScorer
-from sklearn.metrics import make_scorer
 
 
 class MetricContainer(BaseContainer):
@@ -25,7 +31,7 @@ class MetricContainer(BaseContainer):
         The scorer passed to models. Can be a string representing a built-in sklearn scorer,
         a sklearn Scorer object, or None, in which case a Scorer object will be created from
         score_func and args.
-    args : dict, default = {}
+    args : dict, default = {} (empty dict)
         The arguments to always pass to constructor when initializing score_func of class_def class.
     display_name : str, default = None
         Display name (shorter than name). If None or empty, will use name.
@@ -59,7 +65,7 @@ class MetricContainer(BaseContainer):
         name: str,
         score_func: type,
         scorer: Optional[Union[str, _BaseScorer]] = None,
-        args: Dict[str, Any] = None,
+        args: Optional[Dict[str, Any]] = None,
         display_name: Optional[str] = None,
         greater_is_better: bool = True,
         is_custom: bool = False,

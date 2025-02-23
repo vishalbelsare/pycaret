@@ -3,8 +3,9 @@
 # License: MIT
 
 import inspect
-from typing import Dict, Any
-import pycaret.internal.utils
+from typing import Any, Dict, Optional
+
+import pycaret.utils.generic
 
 
 class BaseContainer:
@@ -22,7 +23,7 @@ class BaseContainer:
         The class used for the model, eg. LogisticRegression.
     is_turbo : bool, default = True
         Should the model be used with 'turbo = True' in compare_models().
-    args : dict, default = {}
+    args : dict, default = {} (empty dict)
         The arguments to always pass to constructor when initializing object of class_def class.
 
     Attributes
@@ -35,13 +36,17 @@ class BaseContainer:
         The class used for the model, eg. LogisticRegression.
     is_turbo : bool, default = True
         Should the model be used with 'turbo = True' in compare_models().
-    args : dict, default = {}
+    args : dict, default = {} (empty dict)
         The arguments to always pass to constructor when initializing object of class_def class.
 
     """
 
     def __init__(
-        self, id: str, name: str, class_def: type, args: Dict[str, Any] = None,
+        self,
+        id: str,
+        name: str,
+        class_def: type,
+        args: Optional[Dict[str, Any]] = None,
     ) -> None:
         if not args:
             args = {}
@@ -56,10 +61,10 @@ class BaseContainer:
         self.active = True
 
     def get_class_name(self):
-        return pycaret.internal.utils.get_class_name(self.class_def)
+        return pycaret.utils.generic.get_class_name(self.class_def)
 
     def get_package_name(self):
-        return pycaret.internal.utils.get_package_name(self.class_def)
+        return pycaret.utils.generic.get_package_name(self.class_def)
 
     def get_dict(self, internal: bool = True) -> Dict[str, Any]:
         """
@@ -90,29 +95,38 @@ class BaseContainer:
 
 def get_all_containers(
     container_globals: dict,
-    globals_dict: dict,
+    experiment: Any,
     type_var: type,
     raise_errors: bool = True,
 ) -> Dict[str, BaseContainer]:
+    # https://stackoverflow.com/a/1401900/8925915
     model_container_classes = [
         obj
-        for name, obj in container_globals.items()
-        if inspect.isclass(obj) and type_var in obj.__bases__
+        for _, obj in container_globals.items()
+        if inspect.isclass(obj)
+        # Get all parent class types excluding the object class type
+        # If this is not excluded, then containers like TimeSeriesContainer
+        # also shows up in model_container_classes
+        and type_var in tuple(x for x in inspect.getmro(obj) if x != obj)
     ]
 
     model_containers = []
 
     for obj in model_container_classes:
         if raise_errors:
-            instance = obj(globals_dict)
+            if hasattr(obj, "active") and not obj.active:
+                continue
+            instance = obj(experiment)
             if instance.active:
                 model_containers.append(instance)
         else:
             try:
-                instance = obj(globals_dict)
+                if hasattr(obj, "active") and not obj.active:
+                    continue
+                instance = obj(experiment)
                 if instance.active:
                     model_containers.append(instance)
-            except:
+            except Exception:
                 pass
 
     return {container.id: container for container in model_containers}

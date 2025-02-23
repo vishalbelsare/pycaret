@@ -1,5 +1,8 @@
+# Copyright (C) 2019-2024 PyCaret
+
 # Module: containers.metrics.clustering
 # Author: Antoni Baum (Yard1) <antoni.baum@protonmail.com>
+# Contributors (https://github.com/pycaret/pycaret/graphs/contributors)
 # License: MIT
 
 # The purpose of this module is to serve as a central repository of clustering metrics. The `clustering` module will
@@ -8,13 +11,14 @@
 # `ClusterMetricContainer` as a base, set all of the required parameters in the `__init__` and then call `super().__init__`
 # to complete the process. Refer to the existing classes for examples.
 
-from typing import Optional, Union, Dict, Any
-from pycaret.containers.metrics.base_metric import MetricContainer
+from typing import Any, Dict, Optional, Union
+
+from sklearn import metrics
 from sklearn.metrics._scorer import _BaseScorer
+
 import pycaret.containers.base_container
 import pycaret.internal.metrics
-import numpy as np
-from sklearn import metrics
+from pycaret.containers.metrics.base_metric import MetricContainer
 
 
 class ClusterMetricContainer(MetricContainer):
@@ -39,7 +43,7 @@ class ClusterMetricContainer(MetricContainer):
         - 'pred' for the prediction table
         - 'pred_proba' for pred_proba
         - 'threshold' for decision_function or predict_proba
-    args : dict, default = {}
+    args : dict, default = {} (empty dict)
         The arguments to always pass to constructor when initializing score_func of class_def class.
     display_name : str, default = None
         Display name (shorter than name). Used in display dataframe header. If None or empty, will use name.
@@ -94,9 +98,8 @@ class ClusterMetricContainer(MetricContainer):
         needs_ground_truth: bool = False,
         is_custom: bool = False,
     ) -> None:
-
         allowed_targets = ["pred"]
-        if not target in allowed_targets:
+        if target not in allowed_targets:
             raise ValueError(f"Target must be one of {', '.join(allowed_targets)}.")
 
         if not args:
@@ -164,7 +167,9 @@ class ClusterMetricContainer(MetricContainer):
 class SilhouetteMetricContainer(ClusterMetricContainer):
     def __init__(self, globals_dict: dict) -> None:
         super().__init__(
-            id="silhouette", name="Silhouette", score_func=metrics.silhouette_score,
+            id="silhouette",
+            name="Silhouette",
+            score_func=metrics.silhouette_score,
         )
 
 
@@ -180,7 +185,9 @@ class CHSMetricContainer(ClusterMetricContainer):
 class DBMetricContainer(ClusterMetricContainer):
     def __init__(self, globals_dict: dict) -> None:
         super().__init__(
-            id="db", name="Davies-Bouldin", score_func=metrics.davies_bouldin_score,
+            id="db",
+            name="Davies-Bouldin",
+            score_func=metrics.davies_bouldin_score,
         )
 
 
